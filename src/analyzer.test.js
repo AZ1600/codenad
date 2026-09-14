@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {analyze,applyFixes,samples} from './analyzer.js';
+test('parses JS, TS, JSX and TSX and detects invalid syntax',()=>{for(const lang of ['javascript','typescript','jsx','tsx']){assert(analyze('const x = ;',lang).some(i=>i.severity==='error'));assert.equal(analyze('const x = 1;',lang).length,0);}});
+test('console fixes use AST positions and leave strings/comments untouched',()=>{const code='const s = "console.lgo()"; // console.lgo()\nconsole.lgo(s);';const issues=analyze(code,'javascript');assert.equal(issues.length,1);assert.equal(applyFixes(code,issues),'const s = "console.lgo()"; // console.lgo()\nconsole.log(s);');});
+test('React fixes class only on JSX attributes',()=>{const code='const x = <div class="x">class</div>';assert.equal(applyFixes(code,analyze(code,'jsx')),'const x = <div className="x">class</div>');});
+test('Python missing colon can be corrected to valid grammar',()=>{const issues=analyze(samples.python,'python');assert(issues.some(i=>i.replacement===':'));assert.equal(analyze(applyFixes(samples.python,issues),'python').length,0);});
+test('valid Python blocks are unchanged',()=>{assert.equal(analyze('def foo():\n    return True\n','python').length,0);});
+test('JSON fixes ignore commas inside strings',()=>{const code='{"text":",}","items":[1,],}';const fixed=applyFixes(code,analyze(code,'json'));assert.deepEqual(JSON.parse(fixed),{text:',}',items:[1]});});
+test('JSON, CSS and HTML valid samples parse',()=>{for(const [lang,code] of [['json','{"a":1}'],['html',samples.html],['css',samples.css]])assert.equal(analyze(code,lang).length,0);});
+test('Python block-like text inside triple quoted strings is not fixed',()=>{const code='text = """\ndef example()\n"""\n';assert.equal(analyze(code,'python').length,0);});
