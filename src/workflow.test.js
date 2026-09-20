@@ -32,3 +32,26 @@ test('WebMCP shares UI state and rejects invalid input without changing it',()=>
 test('stale review cannot overwrite code supplied after review opened',()=>{const {dom,d,tool}=setup();try{
  d.querySelector('#analyze').click();d.querySelector('[data-fix]').click();tool.execute({language:'json',code:'{"new":true}'});d.querySelector('#apply').click();assert.match(d.querySelector('.cm-content').textContent,/new/);assert.equal(d.querySelector('#review').open,false);
  }finally{dom.window.close();}});
+test('checking generates full corrected output and copies it without replacing original',async()=>{const {dom,d,w,tool}=setup();try{
+ let copied;Object.defineProperty(w.navigator,'clipboard',{value:{async writeText(text){copied=text;}}});
+ const source='console.lgo("hello");\nconsole.wanr("world");';
+ tool.execute({language:'javascript',code:source});
+ const expected='console.log("hello");\nconsole.warn("world");';
+ assert.equal(d.querySelector('#corrected-code').value,expected);
+ assert.match(d.querySelector('.cm-content').textContent,/console.lgo/);
+ await d.querySelector('#copy-corrected').onclick();assert.equal(copied,expected);
+ d.querySelector('#use-corrected').click();assert.match(d.querySelector('.cm-content').textContent,/console.log/);
+ d.querySelector('#undo-fix').click();assert.match(d.querySelector('.cm-content').textContent,/console.lgo/);
+ }finally{dom.window.close();}});
+test('remaining errors are shown and output is cleared on language changes',()=>{const {dom,d,w,tool}=setup();try{
+ tool.execute({language:'javascript',code:'const x = ;'});
+ assert.match(d.querySelector('#corrected-status').textContent,/remain/);
+ assert.match(d.querySelector('#output-remaining').textContent,/Unexpected/);
+ const select=d.querySelector('#language');select.value='python';select.dispatchEvent(new w.Event('change'));
+ assert.equal(d.querySelector('#corrected-output').hidden,true);assert.equal(d.querySelector('#corrected-code').value,'');
+ tool.execute({language:'python',code:''});assert.equal(d.querySelector('#corrected-output').hidden,true);
+ }finally{dom.window.close();}});
+test('clipboard denial selects output for manual copying',async()=>{const {dom,d,w}=setup();try{
+ Object.defineProperty(w.navigator,'clipboard',{value:{async writeText(){throw new Error('denied');}}});d.querySelector('#analyze').click();await d.querySelector('#copy-corrected').onclick();
+ const field=d.querySelector('#corrected-code');assert.equal(field.selectionStart,0);assert.equal(field.selectionEnd,field.value.length);
+ }finally{dom.window.close();}});

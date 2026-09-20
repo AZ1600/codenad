@@ -1,3 +1,4 @@
+import {correctCode} from './correct.js';
 import {EditorView, basicSetup} from 'codemirror';
 import {EditorState, Compartment} from '@codemirror/state';
 import {keymap} from '@codemirror/view';
@@ -33,7 +34,7 @@ const editor = new EditorView({state:EditorState.create({doc:samples[lang], exte
 function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(()=>$('#toast').classList.remove('visible'),3500); }
 function updateLanguageLabels() { $('#language').value = lang; $('#filename').textContent = filenames[lang]; $('#file-icon').textContent = ({arm:'ARM',kubernetes:'K8', 'github-actions':'CI',terraform:'TF',bicep:'B',dockerfile:'D',bash:'SH'})[lang] ?? lang.toUpperCase(); $('#sample').textContent = cloudLanguages.includes(lang) ? '↻ Load challenge' : '↻ Load example'; renderLesson(); }
 function renderLesson() { const lesson = lessons[lang]; $('#lesson').hidden = !lesson; if (lesson) $('#lesson').innerHTML = `<strong>${esc(challengeActive ? lesson.title : 'Your configuration')}</strong><span class="lesson-status">${challengeActive ? (checked && !issues.length ? 'Challenge checks passed' : 'Practice challenge') : 'Free practice'}</span><p>${esc(challengeActive ? lesson.goal : 'Check your own configuration using the rules available for this format.')}</p>`; }
-function showUnChecked() { $('#insight-status').textContent = 'Not checked'; $('#results').classList.remove('has-results'); $('#results').innerHTML = '<div class="empty-icon">⌕</div><h2>Spot the issue first.</h2><p>Read the configuration, then check it to reveal explanations and suggested fixes.</p>'; renderLesson(); }
+function showUnChecked() { $('#corrected-output').hidden = true; $('#corrected-code').value = '';  $('#insight-status').textContent = 'Not checked'; $('#results').classList.remove('has-results'); $('#results').innerHTML = '<div class="empty-icon">⌕</div><h2>Spot the issue first.</h2><p>Read the configuration, then check it to reveal explanations and suggested fixes.</p>'; renderLesson(); }
 function scope() { return scopes[lang] ?? (lang === 'python' ? 'Python grammar checks; no runtime or import validation.' : ['typescript','tsx'].includes(lang) ? 'Syntax and selected common mistakes; project-wide type checking is not included.' : 'Syntax and selected common mistakes; runtime behavior is not checked.'); }
 function replaceCode(code) { editor.dispatch({changes:{from:0,to:editor.state.doc.length,insert:code}}); }
 function switchLanguage(next) { lang = next; revision++; checked = false; issues = []; recheck = ''; previous = null; challengeActive = false; editor.dispatch({effects:languageCompartment.reconfigure(modes[lang]())}); editor.dispatch(setDiagnostics(editor.state, [])); updateLanguageLabels(); showUnChecked(); }
@@ -44,8 +45,8 @@ function performCheck() {
     clearTimeout(diagnosticTimer); issues = analyze(code, lang); checked = true;
     $('#insight-status').textContent = !code.trim() ? 'Empty' : issues.length ? `${issues.length} found` : 'Checks passed';
     editor.dispatch(setDiagnostics(editor.state, issues.map(i=>({from:i.from,to:i.to,severity:i.severity,message:i.title}))));
-    renderResults(); renderLesson(); return issues;
-  } catch(error) { checked=false; $('#insight-status').textContent='Check failed'; $('#results').textContent=error.message; throw error; }
+    renderResults(); renderCorrectedOutput(); renderLesson(); return issues;
+  } catch(error) { $('#corrected-output').hidden = true; $('#corrected-code').value = ''; checked=false; $('#insight-status').textContent='Check failed'; $('#results').textContent=error.message; throw error; }
 }
 function safeCheck() { try { performCheck(); } catch(error) { toast(error.message); } }
 function renderResults() {
@@ -62,6 +63,28 @@ function renderResults() {
   $('#copy-code').onclick=async()=>{try{await navigator.clipboard.writeText(editor.state.doc.toString());toast('Code copied');}catch{toast('Select your code and copy it manually; the clipboard is unavailable.');}};
   $('#format-code')?.addEventListener('click',formatCode);
   $('#undo-fix')?.addEventListener('click',()=>{const old=previous;previous=null;replaceCode(old.code);recheck='Last change undone. Checks ran again.';safeCheck();});
+}
+function renderCorrectedOutput() {
+  const original = editor.state.doc.toString();
+  if (!original.trim()) { $('#corrected-output').hidden = true; $('#corrected-code').value = ''; return; }
+  const result = correctCode(original, lang);
+  const outputRevision = revision;
+  $('#corrected-output').hidden = false;
+  $('#corrected-code').value = result.code;
+  $('#corrected-status').textContent = result.issues.length
+    ? `${result.changed ? 'Available fixes applied.' : 'No automatic fixes available.'} ${result.issues.length} issue${result.issues.length===1?'':'s'} remain in this output and need review.`
+    : `${result.changed ? 'Available fixes applied and re-checked.' : 'No changes needed.'} No issues found by the available checks.`;
+  $('#output-remaining').innerHTML = result.issues.length ? '<h3>Still needs attention</h3><ul>' + result.issues.map(i=>`<li><strong>Line ${i.line}: ${esc(i.title)}</strong><br>${esc(i.detail)}</li>`).join('') + '</ul>' : '';
+  $('#copy-corrected').onclick = async () => {
+    if (outputRevision !== revision || !checked) { toast('Code changed. Check again for fresh output.'); return; }
+    try { await navigator.clipboard.writeText(result.code); toast('Corrected output copied'); }
+    catch { const field=$('#corrected-code'); field.focus(); field.select(); toast('Output selected. Press Ctrl+C or ⌘C to copy.'); }
+  };
+  $('#use-corrected').disabled = !result.changed;
+  $('#use-corrected').onclick = () => {
+    if (outputRevision !== revision || !checked) { toast('Code changed. Check again for fresh output.'); return; }
+    previous = {code:original}; replaceCode(result.code); safeCheck(); toast('Corrected output moved to editor and re-checked');
+  };
 }
 function reviewFixes(selected) { showReview(applyFixes(editor.state.doc.toString(),selected), 'Review the highlighted changes. Applying them re-checks the configuration automatically.'); }
 function showReview(code, description) {
