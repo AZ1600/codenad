@@ -43,7 +43,7 @@ function performCheck() {
     const code = editor.state.doc.toString();
     if (code.length > 100000) throw new Error('Use a snippet under 100,000 characters.');
     clearTimeout(diagnosticTimer); issues = analyze(code, lang); checked = true;
-    $('#insight-status').textContent = !code.trim() ? 'Empty' : issues.length ? `${issues.length} found` : 'Checks passed';
+    $('#insight-status').textContent = issues.some(i=>i.suggestedLanguage) ? 'Check language' : !code.trim() ? 'Empty' : issues.length ? `${issues.length} found` : 'Checks passed';
     editor.dispatch(setDiagnostics(editor.state, issues.map(i=>({from:i.from,to:i.to,severity:i.severity,message:i.title}))));
     renderResults(); renderCorrectedOutput(); renderLesson(); return issues;
   } catch(error) { $('#corrected-output').hidden = true; $('#corrected-code').value = ''; checked=false; $('#insight-status').textContent='Check failed'; $('#results').textContent=error.message; throw error; }
@@ -54,11 +54,12 @@ function renderResults() {
   const panel = $('#results'); panel.classList.add('has-results');
   if (!code.trim()) { panel.innerHTML='<h2>Your workspace is empty.</h2><p>Paste a configuration or load a challenge.</p>'; return; }
   panel.innerHTML = recheck ? `<div class="recheck-summary" role="status">${esc(recheck)}</div>` : '';
-  if (issues.length) panel.innerHTML += `<div class="result-summary"><span class="error-count">${errors} errors / ${issues.length-errors} suggestions</span><span>${fixable} fixable</span></div>` + issues.map((i,k)=>`<article class="issue ${i.severity}"><div class="issue-top"><span>${i.severity==='error'?'⊗ ERROR':'◇ SUGGESTION'}</span><button class="quiet" data-line="${k}" aria-label="Go to line ${i.line}">LINE ${i.line} ↗</button></div><h3>${esc(i.title)}</h3><h4>Why it matters</h4><p>${esc(i.detail)}</p><h4>Suggested fix</h4><p>${esc(i.suggestion ?? (i.replacement!==undefined ? 'Review this replacement and apply it if it matches your intent.' : 'Correct this in the editor, then check again.'))}</p>${i.replacement!==undefined ? `<code>${esc(code.slice(i.from,i.to)||'(insert)')} → ${esc(i.replacement||'(remove)')}</code>` : ''}<div class="issue-controls">${i.replacement!==undefined?`<button class="secondary" data-fix="${k}">Review this fix</button>`:''}${i.reference?`<a href="${esc(i.reference)}" target="_blank" rel="noopener noreferrer">Official reference ↗</a>`:''}</div></article>`).join('');
+  if (issues.length) panel.innerHTML += `<div class="result-summary"><span class="error-count">${errors} errors / ${issues.length-errors} suggestions</span><span>${fixable} fixable</span></div>` + issues.map((i,k)=>`<article class="issue ${i.severity}"><div class="issue-top"><span>${i.severity==='error'?'⊗ ERROR':'◇ SUGGESTION'}</span><button class="quiet" data-line="${k}" aria-label="Go to line ${i.line}">LINE ${i.line} ↗</button></div><h3>${esc(i.title)}</h3><h4>Why it matters</h4><p>${esc(i.detail)}</p><h4>Suggested fix</h4><p>${esc(i.suggestion ?? (i.replacement!==undefined ? 'Review this replacement and apply it if it matches your intent.' : 'Correct this in the editor, then check again.'))}</p>${i.replacement!==undefined ? `<code>${esc(code.slice(i.from,i.to)||'(insert)')} → ${esc(i.replacement||'(remove)')}</code>` : ''}<div class="issue-controls">${i.suggestedLanguage?`<button class="primary" data-language-fix="${k}">Switch to Python &amp; check</button>`:''}${i.replacement!==undefined?`<button class="secondary" data-fix="${k}">Review this fix</button>`:''}${i.reference?`<a href="${esc(i.reference)}" target="_blank" rel="noopener noreferrer">Official reference ↗</a>`:''}</div></article>`).join('');
   else panel.innerHTML += '<div class="success-icon">✓</div><h2>No issues found by these checks.</h2><p>Review the coverage below before using this configuration in a real project.</p>';
   panel.innerHTML += `<div class="result-actions">${fixable>1?'<button class="primary" id="review-all">Review all fixes</button>':''}<button class="secondary" id="copy-code">Copy code</button>${formatParsers[lang]?'<button class="secondary" id="format-code">Format</button>':''}${previous?'<button class="secondary" id="undo-fix">Undo last change</button>':''}</div><p class="scope-note">${esc(scope())}</p>`;
   panel.querySelectorAll('[data-line]').forEach(button=>button.onclick=()=>{const i=issues[Number(button.dataset.line)];editor.dispatch({selection:{anchor:i.from},scrollIntoView:true});editor.focus();});
   panel.querySelectorAll('[data-fix]').forEach(button=>button.onclick=()=>reviewFixes([issues[Number(button.dataset.fix)]]));
+  panel.querySelectorAll('[data-language-fix]').forEach(button=>button.onclick=()=>{const next=issues[Number(button.dataset.languageFix)].suggestedLanguage; switchLanguage(next);safeCheck();});
   $('#review-all')?.addEventListener('click',()=>reviewFixes(issues));
   $('#copy-code').onclick=async()=>{try{await navigator.clipboard.writeText(editor.state.doc.toString());toast('Code copied');}catch{toast('Select your code and copy it manually; the clipboard is unavailable.');}};
   $('#format-code')?.addEventListener('click',formatCode);
@@ -66,7 +67,7 @@ function renderResults() {
 }
 function renderCorrectedOutput() {
   const original = editor.state.doc.toString();
-  if (!original.trim()) { $('#corrected-output').hidden = true; $('#corrected-code').value = ''; return; }
+  if (!original.trim() || issues.some(i=>i.suggestedLanguage)) { $('#corrected-output').hidden = true; $('#corrected-code').value = ''; return; }
   const result = correctCode(original, lang);
   const outputRevision = revision;
   $('#corrected-output').hidden = false;

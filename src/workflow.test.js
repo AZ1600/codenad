@@ -55,3 +55,8 @@ test('clipboard denial selects output for manual copying',async()=>{const {dom,d
  Object.defineProperty(w.navigator,'clipboard',{value:{async writeText(){throw new Error('denied');}}});d.querySelector('#analyze').click();await d.querySelector('#copy-corrected').onclick();
  const field=d.querySelector('#corrected-code');assert.equal(field.selectionStart,0);assert.equal(field.selectionEnd,field.value.length);
  }finally{dom.window.close();}});
+test('wrong language suppresses corrected output and offers Python check',()=>{const {dom,d,tool}=setup();try{
+ const code='from app import models\ndef get_items(db):\n    return db.query(models.Item).filter(/models.Item.id == 1)';
+ tool.execute({language:'bicep',code});assert.match(d.querySelector('#results').textContent,/looks like Python/);assert.equal(d.querySelector('#corrected-output').hidden,true);
+ d.querySelector('[data-language-fix]').click();assert.equal(d.querySelector('#language').value,'python');assert.match(d.querySelector('#results').textContent,/Unexpected or missing syntax/);assert.match(d.querySelector('#corrected-status').textContent,/remain/);
+ }finally{dom.window.close();}});
